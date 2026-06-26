@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CollabDocs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-sidebar: #1a1a2e; --bg-editor: #f8f9fa; --bg-topbar: #16213e;
+    --accent: #6366f1; --accent-dim: #4f51c8; --text-light: #e2e8f0;
+    --text-muted: #94a3b8; --border: #2d3748;
+    --font-mono: 'Fira Code','Cascadia Code','Consolas',monospace;
+    --font-ui: -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  body { display:flex; flex-direction:column; height:100vh; overflow:hidden;
+    background:var(--bg-editor); font-family:var(--font-ui); }
+
+  /* Top bar */
+  #topbar { display:flex; align-items:center; gap:16px; background:var(--bg-topbar);
+    color:var(--text-light); padding:0 20px; height:48px; flex-shrink:0;
+    border-bottom:1px solid var(--border); }
+  #topbar h1 { font-size:15px; font-weight:600; color:var(--accent); letter-spacing:.5px; }
+  #doc-title { font-size:14px; color:var(--text-light); flex:1; }
+  #version-badge { font-size:11px; color:var(--text-muted); background:#0f172a;
+    padding:2px 8px; border-radius:12px; border:1px solid var(--border); }
+  #conn-status { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); }
+  #conn-dot { width:8px; height:8px; border-radius:50%; background:#64748b; }
+  #conn-dot.live { background:#22c55e; }
+  #conn-dot.conn { background:#f59e0b; animation:blink 1s infinite; }
+  #conn-dot.dead { background:#ef4444; }
+
+  /* Main layout */
+  #main { display:flex; flex:1; overflow:hidden; }
+
+  /* Left sidebar */
+  #sidebar { width:220px; flex-shrink:0; background:var(--bg-sidebar);
+    color:var(--text-light); display:flex; flex-direction:column;
+    border-right:1px solid var(--border); }
+  #sidebar-header { padding:14px 16px 10px; font-size:11px; font-weight:700;
+    letter-spacing:1px; color:var(--text-muted); text-transform:uppercase;
+    border-bottom:1px solid var(--border); }
+  #users-list { flex:1; overflow-y:auto; padding:8px 0; }
+  .user-item { display:flex; align-items:flex-start; gap:10px;
+    padding:8px 14px; transition:background .15s; }
+  .user-item:hover { background:rgba(255,255,255,.04); }
+  .user-avatar { width:30px; height:30px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; font-size:13px; font-weight:700;
+    color:#fff; flex-shrink:0; }
+  .user-info { min-width:0; }
+  .user-name { font-size:13px; font-weight:500; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  .user-pos { font-size:11px; color:var(--text-muted); margin-top:1px; }
+
+  /* History panel */
+  #history-panel { width:0; overflow:hidden; background:var(--bg-sidebar);
+    border-left:1px solid var(--border); transition:width .2s ease;
+    display:flex; flex-direction:column; }
+  #history-panel.open { width:280px; }
+  #history-header { padding:14px 16px 10px; font-size:11px; font-weight:700;
+    letter-spacing:1px; color:var(--text-muted); text-transform:uppercase;
+    border-bottom:1px solid var(--border); display:flex; align-items:center;
+    justify-content:space-between; }
+  #history-close { background:none; border:none; color:var(--text-muted);
+    cursor:pointer; font-size:18px; line-height:1; padding:0; }
+  #history-close:hover { color:var(--text-light); }
+  #history-list { flex:1; overflow-y:auto; padding:6px 0; }
+  .hist-item { padding:8px 14px; border-bottom:1px solid rgba(255,255,255,.04);
+    cursor:pointer; transition:background .1s; }
+  .hist-item:hover { background:rgba(255,255,255,.05); }
+  .hist-type { font-size:11px; font-weight:600; color:var(--accent); }
+  .hist-user { font-size:11px; color:var(--text-muted); }
+  .hist-time { font-size:10px; color:#475569; margin-top:2px; }
+  .hist-payload { font-size:11px; color:#64748b; margin-top:2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #timetravel-wrap { padding:12px 14px; border-top:1px solid var(--border); }
+  #timetravel-wrap label { font-size:11px; color:var(--text-muted); display:block; margin-bottom:6px; }
+  #tt-slider { width:100%; accent-color:var(--accent); }
+  #tt-preview { margin-top:8px; background:#0f172a; border-radius:6px; padding:8px;
+    font-family:var(--font-mono); font-size:12px; color:var(--text-light);
+    min-height:60px; max-height:120px; overflow-y:auto; white-space:pre-wrap;
+    word-break:break-all; display:none; }
+  #tt-preview.active { display:block; }
+
+  /* Editor area */
+  #editor-area { flex:1; display:flex; flex-direction:column; overflow:hidden; position:relative; }
+  #editor-toolbar { padding:8px 16px; display:flex; gap:8px; align-items:center;
+    background:#fff; border-bottom:1px solid #e2e8f0; flex-shrink:0; }
+  .toolbar-btn { padding:5px 12px; border:1px solid #e2e8f0; border-radius:6px;
+    background:#fff; font-size:12px; cursor:pointer; color:#374151; transition:all .15s; }
+  .toolbar-btn:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #editor-wrap { flex:1; position:relative; overflow:auto; background:var(--bg-editor); }
+  #editor { position:relative; z-index:1; font-family:var(--font-mono); font-size:16px;
+    line-height:1.6; white-space:pre-wrap; word-break:break-word; min-height:400px;
+    padding:32px; outline:none; background:transparent; color:#1e293b; min-width:100%; }
+  #editor:empty::before { content:"Start typing\2026"; color:#94a3b8; pointer-events:none; }
+  #cursor-layer { position:absolute; top:0; left:0; pointer-events:none; overflow:hidden; z-index:2; }
+  .remote-cursor { position:absolute; width:2px; height:20px;
+    animation:blink 1.2s step-start infinite; }
+  .cursor-label { position:absolute; font-size:11px; color:#fff; padding:2px 6px;
+    border-radius:3px; white-space:nowrap; transform:translateX(-50%);
+    box-shadow:0 2px 6px rgba(0,0,0,.3); pointer-events:none; }
+  .selection-highlight { position:absolute; pointer-events:none; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  /* Status bar */
+  #statusbar { height:26px; background:var(--bg-topbar); color:var(--text-muted);
+    font-size:11px; display:flex; align-items:center; padding:0 16px; gap:16px;
+    border-top:1px solid var(--border); flex-shrink:0; }
+
+  /* Join modal */
+  #join-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6);
+    display:flex; align-items:center; justify-content:center; z-index:1000;
+    backdrop-filter:blur(4px); }
+  #join-modal { background:var(--bg-topbar); border:1px solid var(--border);
+    border-radius:12px; padding:32px 40px; min-width:340px;
+    box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  #join-modal h2 { font-size:20px; color:var(--text-light); margin-bottom:8px; }
+  #join-modal p  { font-size:13px; color:var(--text-muted); margin-bottom:24px; }
+  #name-input { width:100%; padding:10px 14px; border:1px solid var(--border);
+    border-radius:8px; background:#0f172a; color:var(--text-light);
+    font-size:15px; outline:none; transition:border-color .15s; }
+  #name-input:focus { border-color:var(--accent); }
+  #join-btn { width:100%; margin-top:14px; padding:11px; background:var(--accent);
+    color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:600;
+    cursor:pointer; transition:background .15s; }
+  #join-btn:hover { background:var(--accent-dim); }
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#334155; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div id="join-overlay">
+  <div id="join-modal">
+    <h2>Join Document</h2>
+    <p>Enter your name so others can see your cursor.</p>
+    <input id="name-input" type="text" placeholder="Your name" maxlength="24" autofocus>
+    <button id="join-btn">Join</button>
+  </div>
+</div>
+
+<div id="topbar">
+  <h1>CollabDocs</h1>
+  <span id="doc-title">Loading...</span>
+  <span id="version-badge">v0</span>
+  <div id="conn-status">
+    <div id="conn-dot"></div>
+    <span id="conn-text">Connecting</span>
+  </div>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div id="sidebar-header">Online &mdash; <span id="user-count">0</span></div>
+    <div id="users-list"></div>
+  </div>
+
+  <div id="editor-area">
+    <div id="editor-toolbar">
+      <button class="toolbar-btn" id="btn-history">History</button>
+      <button class="toolbar-btn" id="btn-resync">↺ Resync</button>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:#94a3b8" id="cursor-info">Ln 1, Col 1</span>
+    </div>
+    <div id="editor-wrap">
+      <div id="editor" contenteditable="true" spellcheck="false" autocorrect="off" autocomplete="off"></div>
+      <div id="cursor-layer"></div>
+    </div>
+  </div>
+
+  <div id="history-panel">
+    <div id="history-header">
+      <span>Event History</span>
+      <button id="history-close">&#215;</button>
+    </div>
+    <div id="history-list"></div>
+    <div id="timetravel-wrap">
+      <label>Time Travel: <span id="tt-label">live</span></label>
+      <input id="tt-slider" type="range" min="1" max="1" value="1">
+      <div id="tt-preview"></div>
+    </div>
+  </div>
+</div>
+
+<div id="statusbar">
+  <span id="status-doc"></span>
+  <span id="status-chars">0 chars</span>
+</div>
+
+<script>
+'use strict';
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function colorForUser(uid) {
+  const palette = ['#E53935','#8E24AA','#1E88E5','#00ACC1',
+                   '#43A047','#F4511E','#6D4C41','#00897B'];
+  let h = 0;
+  for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) & 0xffff;
+  return palette[h % palette.length];
+}
+
+function relativeTime(iso) {
+  const diff = (Date.now() - new Date(iso)) / 1000;
+  if (diff < 60)   return Math.round(diff) + 's ago';
+  if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+  return Math.round(diff / 3600) + 'h ago';
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Caret helpers ─────────────────────────────────────────────────────────────
+
+function getCaretPos(el) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return 0;
+  const range = sel.getRangeAt(0);
+  const pre = range.cloneRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(range.startContainer, range.startOffset);
+  return pre.toString().length;
+}
+
+function getSelectionEnd(el) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return 0;
+  const range = sel.getRangeAt(0);
+  const pre = range.cloneRange();
+  pre.selectNodeContents(el);
+  pre.setEnd(range.endContainer, range.endOffset);
+  return pre.toString().length;
+}
+
+function getNodeAndOffset(el, pos) {
+  let remaining = pos;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (remaining <= node.textContent.length) return [node, remaining];
+    remaining -= node.textContent.length;
+  }
+  const walker2 = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let last = null;
+  while (walker2.nextNode()) last = walker2.currentNode;
+  if (last) return [last, last.textContent.length];
+  return [el, 0];
+}
+
+function setCaretPos(el, pos) {
+  const [node, offset] = getNodeAndOffset(el, pos);
+  const sel = window.getSelection();
+  const range = document.createRange();
+  try {
+    range.setStart(node, offset);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch(e) {}
+}
+
+function getPositionRect(pos) {
+  const el = document.getElementById('editor');
+  const [node, offset] = getNodeAndOffset(el, pos);
+  if (!node) return null;
+  const range = document.createRange();
+  try {
+    range.setStart(node, offset);
+    range.collapse(true);
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return null;
+    return rect;
+  } catch(e) { return null; }
+}
+
+// ── App state ─────────────────────────────────────────────────────────────────
+
+const state = {
+  docId: null, userId: null, displayName: null,
+  version: 0, content: '',
+  ws: null, connected: false, reconnectDelay: 500,
+  peers: new Map(),
+  historyEvents: [], timeTravelMode: false,
+};
+
+const editor      = document.getElementById('editor');
+const cursorLayer = document.getElementById('cursor-layer');
+const editorWrap  = document.getElementById('editor-wrap');
+
+// ── Editor content helpers ────────────────────────────────────────────────────
+
+function editorText() {
+  return editor.innerText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function setEditorText(text) {
+  suppressInput = true;
+  editor.textContent = text;
+  if (text.endsWith('\n') || text === '') {
+    editor.appendChild(document.createElement('br'));
+  }
+  prevContent = text;
+  suppressInput = false;
+}
+
+// ── Diff / OT ─────────────────────────────────────────────────────────────────
+
+function computeDiff(oldText, newText) {
+  let start = 0;
+  while (start < oldText.length && start < newText.length &&
+         oldText[start] === newText[start]) start++;
+  let oldEnd = oldText.length, newEnd = newText.length;
+  while (oldEnd > start && newEnd > start &&
+         oldText[oldEnd-1] === newText[newEnd-1]) { oldEnd--; newEnd--; }
+  const ops = [];
+  if (oldEnd > start) ops.push({ type:'deleteText', position:start, length:oldEnd-start });
+  if (newEnd > start) ops.push({ type:'insertText', position:start, text:newText.slice(start,newEnd) });
+  return ops;
+}
+
+function transformCaret(caret, evType, pos, lenOrText) {
+  const len = typeof lenOrText === 'string' ? [...lenOrText].length : lenOrText;
+  if (evType === 'text.inserted') {
+    return caret > pos ? caret + len : caret;
+  }
+  if (evType === 'text.deleted') {
+    if (caret > pos + len) return caret - len;
+    if (caret > pos)       return pos;
+  }
+  return caret;
+}
+
+// ── Send ──────────────────────────────────────────────────────────────────────
+
+function sendWS(msg) {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify(
+            Object.assign({ documentId:state.docId, userId:state.userId, displayName:state.displayName, baseVersion:state.version }, msg)
+    ));
+  }
+}
+
+// ── Apply remote event ────────────────────────────────────────────────────────
+
+function applyEventToContent(ev) {
+  switch (ev.type) {
+    case 'text.inserted': {
+      const p = ev.payload;
+      if (ev.userId === state.userId) return; // already applied by input handler
+      const arr = [...state.content];
+      arr.splice(p.position, 0, ...p.text);
+      state.content = arr.join('');
+      const caretBefore = getCaretPos(editor);
+      setEditorText(state.content);
+      setCaretPos(editor, transformCaret(caretBefore, ev.type, p.position, p.text));
+      state.peers.forEach((peer, uid) => {
+        if (uid !== ev.userId && peer.position != null) {
+          peer.position     = transformCaret(peer.position, ev.type, p.position, p.text);
+          peer.selectionEnd = transformCaret(peer.selectionEnd || peer.position, ev.type, p.position, p.text);
+        }
+      });
+      break;
+    }
+    case 'text.deleted': {
+      const p = ev.payload;
+      if (ev.userId === state.userId) return; // already applied by input handler
+      const arr = [...state.content];
+      arr.splice(p.position, p.length);
+      state.content = arr.join('');
+      const caretBefore = getCaretPos(editor);
+      setEditorText(state.content);
+      setCaretPos(editor, transformCaret(caretBefore, ev.type, p.position, p.length));
+      state.peers.forEach((peer, uid) => {
+        if (uid !== ev.userId && peer.position != null) {
+          peer.position     = transformCaret(peer.position, ev.type, p.position, p.length);
+          peer.selectionEnd = transformCaret(peer.selectionEnd || peer.position, ev.type, p.position, p.length);
+        }
+      });
+      break;
+    }
+    case 'cursor.moved': {
+      if (ev.userId !== state.userId) {
+        const peer = state.peers.get(ev.userId) || {};
+        peer.position     = ev.payload.position;
+        peer.selectionEnd = ev.payload.selectionEnd;
+        if (ev.displayName) peer.displayName = ev.displayName;
+        state.peers.set(ev.userId, peer);
+      }
+      return;
+    }
+    case 'document.created': {
+      document.getElementById('doc-title').textContent = ev.payload.title || 'Untitled';
+      document.title = ev.payload.title || 'CollabDocs';
+      return;
+    }
+    default: return;
+  }
+  updateStatusBar();
+}
+
+// ── Cursor overlay ────────────────────────────────────────────────────────────
+
+function renderRemoteCursors() {
+  cursorLayer.innerHTML = '';
+  const editorRect = editor.getBoundingClientRect();
+
+  state.peers.forEach((peer, uid) => {
+    if (peer.position == null) return;
+    const color = colorForUser(uid);
+    const name  = peer.displayName || uid.slice(0, 8);
+
+    // Selection highlight
+    const selStart = Math.min(peer.position, peer.selectionEnd || peer.position);
+    const selEnd   = Math.max(peer.position, peer.selectionEnd || peer.position);
+    if (selEnd > selStart) {
+      const [sn, so] = getNodeAndOffset(editor, selStart);
+      const [en, eo] = getNodeAndOffset(editor, selEnd);
+      if (sn && en) {
+        try {
+          const r = document.createRange();
+          r.setStart(sn, so); r.setEnd(en, eo);
+          for (const rect of r.getClientRects()) {
+            const hl = document.createElement('div');
+            hl.className = 'selection-highlight';
+            hl.style.cssText = 'left:' + (rect.left - editorRect.left + editorWrap.scrollLeft) + 'px;'
+              + 'top:'    + (rect.top  - editorRect.top  + editorWrap.scrollTop)  + 'px;'
+              + 'width:'  + rect.width  + 'px;'
+              + 'height:' + rect.height + 'px;'
+              + 'background:' + color + '40;';
+            cursorLayer.appendChild(hl);
+          }
+        } catch(e) {}
+      }
+    }
+
+    // Caret line — use requestAnimationFrame to ensure DOM has repainted
+// before measuring character positions, fixing the label offset bug.
+    requestAnimationFrame(() => {
+      const rect = getPositionRect(peer.position);
+      if (!rect) return;
+      const editorRect2 = editor.getBoundingClientRect();
+      const x = rect.left - editorRect2.left + editorWrap.scrollLeft;
+      const y = rect.top  - editorRect2.top  + editorWrap.scrollTop;
+
+      const caret = document.createElement('div');
+      caret.className = 'remote-cursor';
+      caret.style.cssText = 'left:' + x + 'px;top:' + y + 'px;background:' + color + ';';
+      cursorLayer.appendChild(caret);
+
+      const label = document.createElement('div');
+      label.className = 'cursor-label';
+      label.textContent = name;
+      // Pin label above caret; shift left by half its width for centering.
+      label.style.cssText = 'left:' + x + 'px;top:' + Math.max(0, y - 24) + 'px;background:' + color + ';';
+      // After label is in DOM, measure it and center it properly.
+      requestAnimationFrame(() => {
+        const lw = label.offsetWidth;
+        label.style.left = Math.max(0, x - lw / 2) + 'px';
+      });
+      cursorLayer.appendChild(label);
+    });
+  });
+}
+
+const ro = new ResizeObserver(() => {
+  cursorLayer.style.width  = editor.offsetWidth  + 'px';
+  cursorLayer.style.height = Math.max(editor.scrollHeight, editorWrap.clientHeight) + 'px';
+  renderRemoteCursors();
+});
+ro.observe(editor);
+editorWrap.addEventListener('scroll', () => {
+  cursorLayer.style.top  = (-editorWrap.scrollTop)  + 'px';
+  cursorLayer.style.left = (-editorWrap.scrollLeft) + 'px';
+  renderRemoteCursors();
+});
+
+// ── Users sidebar ─────────────────────────────────────────────────────────────
+
+function updateUsersSidebar() {
+  const list = document.getElementById('users-list');
+  list.innerHTML = '';
+  document.getElementById('user-count').textContent = state.peers.size;
+  state.peers.forEach((peer, uid) => {
+    const color = colorForUser(uid);
+    const name  = peer.displayName || uid.slice(0, 8);
+    const pos   = peer.position || 0;
+    const lines = state.content.slice(0, pos).split('\n');
+    const ln = lines.length, col = (lines[lines.length-1]||'').length + 1;
+    const item = document.createElement('div');
+    item.className = 'user-item';
+    item.innerHTML = '<div class="user-avatar" style="background:' + color + '">'
+      + escHtml(name[0].toUpperCase()) + '</div>'
+      + '<div class="user-info"><div class="user-name">' + escHtml(name) + '</div>'
+      + '<div class="user-pos">Ln ' + ln + ', Col ' + col + '</div></div>';
+    list.appendChild(item);
+  });
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────────
+
+function updateStatusBar() {
+  document.getElementById('status-chars').textContent = [...state.content].length + ' chars';
+  document.getElementById('version-badge').textContent = 'v' + state.version;
+  const pos    = getCaretPos(editor);
+  const lines  = state.content.slice(0, pos).split('\n');
+  const ln = lines.length, col = (lines[lines.length-1]||'').length + 1;
+  document.getElementById('cursor-info').textContent = 'Ln ' + ln + ', Col ' + col;
+  document.getElementById('status-doc').textContent  = 'doc: ' + (state.docId || '...');
+}
+
+// ── Connection status ─────────────────────────────────────────────────────────
+
+function setConnStatus(status) {
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-text');
+  dot.className = '';
+  if (status === 'live')          { dot.classList.add('live'); txt.textContent = 'Live'; }
+  else if (status === 'connecting'||status === 'reconnecting') {
+    dot.classList.add('conn');
+    txt.textContent = status === 'reconnecting' ? 'Reconnecting...' : 'Connecting...';
+  } else { dot.classList.add('dead'); txt.textContent = 'Disconnected'; }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+
+function connect() {
+  setConnStatus('connecting');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/ws'
+    + '?documentId=' + state.docId
+    + '&userId='     + state.userId
+    + '&displayName=' + encodeURIComponent(state.displayName);
+
+  const ws = new WebSocket(url);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    state.connected = true;
+    state.reconnectDelay = 500;
+    setConnStatus('live');
+  };
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch(e) { return; }
+    handleServerMessage(msg);
+  };
+  ws.onclose = () => {
+    state.connected = false; state.ws = null;
+    setConnStatus('reconnecting');
+    setTimeout(() => { if (!state.connected) connect(); }, state.reconnectDelay);
+    state.reconnectDelay = Math.min(state.reconnectDelay * 2, 30000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+// ── Server message handler ────────────────────────────────────────────────────
+
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case 'snapshot': {
+      const s = msg.payload;
+      state.version = s.version || 0;
+      state.content = s.content || '';
+      setEditorText(state.content);
+      clearTimeout(inputTimer);   // cancel any pending diff send
+      prevContent = state.content; // align baseline with snapshot
+      document.getElementById('doc-title').textContent = s.title || 'Untitled';
+      document.title = s.title || 'CollabDocs';
+      if (s.cursors) {
+        for (const [uid, pos] of Object.entries(s.cursors)) {
+          if (uid !== state.userId) {
+            const peer = state.peers.get(uid) || {};
+            peer.position = pos;
+            state.peers.set(uid, peer);
+          }
+        }
+      }
+      setConnStatus('live');
+      // Add self so own cursor label renders in the overlay.
+      const selfPeer = state.peers.get(state.userId) || {};
+      selfPeer.displayName = state.displayName;
+      selfPeer.position = 0;
+      selfPeer.selectionEnd = 0;
+      state.peers.set(state.userId, selfPeer);
+      setConnStatus('live');
+      renderRemoteCursors();
+      renderRemoteCursors();
+      updateUsersSidebar();
+      updateStatusBar();
+      break;
+    }
+    case 'event': {
+      const ev = msg.payload;
+      state.version = ev.sequenceNumber || state.version;
+      applyEventToContent(ev);
+      renderRemoteCursors();
+      updateUsersSidebar();
+      updateStatusBar();
+      state.historyEvents.push(ev);
+      updateTimeTravelSlider();
+      break;
+    }
+    case 'ack': break;
+    case 'error': console.warn('server error:', msg.payload); break;
+    case 'user.joined': {
+      const p = msg.payload;
+      if (p.userId === state.userId) break;
+      const peer = state.peers.get(p.userId) || {};
+      peer.displayName = p.displayName;
+      state.peers.set(p.userId, peer);
+      updateUsersSidebar();
+      break;
+    }
+    case 'user.left': {
+      state.peers.delete(msg.payload.userId);
+      renderRemoteCursors();
+      updateUsersSidebar();
+      break;
+    }
+  }
+}
+
+// ── Editor input ──────────────────────────────────────────────────────────────
+
+let prevContent = '';
+let inputTimer = null;
+
+let suppressInput = false;
+
+editor.addEventListener('input', () => {
+  if (suppressInput || state.timeTravelMode) return;
+  const newContent = editorText();
+  const ops = computeDiff(prevContent, newContent);
+  for (const op of ops) sendWS(op);
+  prevContent = newContent;
+  state.content = newContent;
+  updateStatusBar();
+  // Sync own cursor position into peers on every keystroke.
+  const selfPos  = getCaretPos(editor);
+  const selfPeer = state.peers.get(state.userId) || {};
+  selfPeer.displayName = state.displayName;
+  selfPeer.position    = selfPos;
+  selfPeer.selectionEnd = selfPos;
+  state.peers.set(state.userId, selfPeer);
+  renderRemoteCursors();
+});
+
+editor.addEventListener('keyup',   updateStatusBar);
+editor.addEventListener('mouseup', updateStatusBar);
+
+document.addEventListener('selectionchange', () => {
+  if (document.activeElement !== editor) return;
+  const pos    = getCaretPos(editor);
+  const selEnd = getSelectionEnd(editor);
+  sendWS({ type:'moveCursor', position:pos, selectionEnd:selEnd });
+
+  // Keep own cursor in peers so it renders in the overlay in real time.
+  const self = state.peers.get(state.userId) || {};
+  self.displayName = state.displayName;
+  self.position    = pos;
+  self.selectionEnd = selEnd;
+  state.peers.set(state.userId, self);
+  renderRemoteCursors();
+  updateStatusBar();
+});
+
+// ── History panel ─────────────────────────────────────────────────────────────
+
+document.getElementById('btn-history').addEventListener('click', async () => {
+  const panel = document.getElementById('history-panel');
+  if (panel.classList.toggle('open')) await loadHistory();
+});
+
+document.getElementById('btn-resync').addEventListener('click', () => {
+  state.ws?.close(); // triggers reconnect which re-fetches snapshot
+});
+
+document.getElementById('history-close').addEventListener('click', () => {
+  document.getElementById('history-panel').classList.remove('open');
+});
+
+async function loadHistory() {
+  try {
+    const res  = await fetch('/api/documents/' + state.docId + '/history');
+    const json = await res.json();
+    state.historyEvents = json.data || [];
+    renderHistoryList(state.historyEvents);
+    updateTimeTravelSlider();
+  } catch(e) { console.error('history load:', e); }
+}
+
+function renderHistoryList(events) {
+  const list = document.getElementById('history-list');
+  list.innerHTML = '';
+  for (const ev of events) {
+    const item = document.createElement('div');
+    item.className = 'hist-item';
+    item.innerHTML =
+      '<div class="hist-type">' + escHtml(ev.type) + '</div>'
+      + '<div class="hist-user">by ' + escHtml((ev.displayName||ev.userId||'').slice(0,20)) + '</div>'
+      + '<div class="hist-time">' + relativeTime(ev.occurredAt) + ' &middot; seq ' + ev.sequenceNumber + '</div>'
+      + '<div class="hist-payload">' + escHtml(payloadPreview(ev)) + '</div>';
+    list.appendChild(item);
+  }
+  list.scrollTop = list.scrollHeight;
+}
+
+function payloadPreview(ev) {
+  try {
+    const p = ev.payload;
+    if (ev.type === 'text.inserted')   return '+' + JSON.stringify(p.text) + ' @' + p.position;
+    if (ev.type === 'text.deleted')    return '-' + p.length + ' chars @' + p.position;
+    if (ev.type === 'cursor.moved')    return 'cursor -> ' + p.position;
+    if (ev.type === 'document.created') return '"' + p.title + '"';
+  } catch(e) {}
+  return '';
+}
+
+// ── Time Travel ───────────────────────────────────────────────────────────────
+
+function updateTimeTravelSlider() {
+  const slider = document.getElementById('tt-slider');
+  const max = state.historyEvents.length;
+  slider.max = max; slider.value = max;
+  document.getElementById('tt-label').textContent = 'live';
+}
+
+document.getElementById('tt-slider').addEventListener('input', (e) => {
+  const idx     = parseInt(e.target.value, 10);
+  const max     = state.historyEvents.length;
+  const preview = document.getElementById('tt-preview');
+  const label   = document.getElementById('tt-label');
+  if (idx >= max) {
+    state.timeTravelMode = false;
+    preview.classList.remove('active');
+    label.textContent = 'live';
+    return;
+  }
+  state.timeTravelMode = true;
+  label.textContent = 'seq ' + (state.historyEvents[idx-1] && state.historyEvents[idx-1].sequenceNumber || idx);
+  let content = '';
+  for (let i = 0; i < idx; i++) {
+    const ev = state.historyEvents[i];
+    if (!ev || !ev.payload) continue;
+    const p = ev.payload;
+    if (ev.type === 'text.inserted') { const a=[...content]; a.splice(p.position,0,...p.text); content=a.join(''); }
+    else if (ev.type === 'text.deleted') { const a=[...content]; a.splice(p.position,p.length); content=a.join(''); }
+  }
+  preview.textContent = content || '(empty)';
+  preview.classList.add('active');
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+async function init() {
+  const params = new URLSearchParams(location.search);
+  let docId = params.get('doc');
+  if (!docId) {
+    docId = crypto.randomUUID();
+    try {
+      await fetch('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id:docId, title:'New Document', userId:'system' }),
+      });
+    } catch(e) { console.error('create doc:', e); }
+    const u = new URL(location.href);
+    u.searchParams.set('doc', docId);
+    history.replaceState(null, '', u.toString());
+  }
+  state.docId = docId;
+
+  let userId = sessionStorage.getItem('collab-user-id');
+  if (!userId) { userId = crypto.randomUUID(); sessionStorage.setItem('collab-user-id', userId); }
+  state.userId = userId;
+
+  const savedName = sessionStorage.getItem('collab-display-name');
+  if (savedName) {
+    state.displayName = savedName;
+    document.getElementById('join-overlay').style.display = 'none';
+    startSession();
+  } else {
+    const overlay   = document.getElementById('join-overlay');
+    const nameInput = document.getElementById('name-input');
+    function doJoin() {
+      const name = nameInput.value.trim() || ('User-' + userId.slice(0,4));
+      sessionStorage.setItem('collab-display-name', name);
+      state.displayName = name;
+      overlay.style.display = 'none';
+      startSession();
+    }
+    document.getElementById('join-btn').addEventListener('click', doJoin);
+    nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
+  }
+}
+
+function startSession() { prevContent = ''; state.content = ''; connect(); }
+
+init();
+</script>
+</body>
+</html>
